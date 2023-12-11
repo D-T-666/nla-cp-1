@@ -4,7 +4,7 @@ use std::{
 };
 
 use pad::{Alignment, PadStr};
-
+use rayon::prelude::*;
 use crate::strat::{Field, RandomRange};
 
 pub trait Exponent {
@@ -26,7 +26,9 @@ where
         + Copy
         + Display
         + Exponent
-        + Round,
+        + Round
+        + Send
+        + Sync,
 {
 }
 
@@ -105,13 +107,13 @@ where
         let rhs = rhs.transpose();
 
         for i in 0..self.n {
-            for j in 0..rhs.n {
-                res.data[i][j] = self.data[i]
+            res.data[i] = (0..rhs.n).into_par_iter().map(|j| {
+                self.data[i]
                     .iter()
                     .zip(&rhs.data[j])
                     .map(|(&a, &b)| a * b)
-                    .fold(T::ZERO, |a, c| a + c);
-            }
+                    .fold(T::ZERO, |a, c| a + c)
+            }).collect::<Vec<_>>();
         }
 
         res
@@ -151,30 +153,32 @@ where
         res
     }
 
-    pub fn tril(mut self) -> Self {
+    pub fn tril(&self) -> Self {
+        let mut res = Self::zero(self.n, self.m);
         for i in 0..self.n {
             for j in 0..self.m {
                 if j <= i {
-                    self[i][j] = self[i][j];
+                    res.data[i][j] = self[i][j];
                 } else {
-                    self[i][j] = T::ZERO;
+                    res.data[i][j] = T::ZERO;
                 }
             }
         }
-        self
+        res
     }
 
-    pub fn triu(mut self) -> Self {
+    pub fn triu(&self) -> Self {
+        let mut res = Self::zero(self.n, self.m);
         for i in 0..self.n {
             for j in 0..self.m {
                 if j >= i {
-                    self[i][j] = self[i][j];
+                    res.data[i][j] = self[i][j];
                 } else {
-                    self[i][j] = T::ZERO;
+                    res.data[i][j] = T::ZERO;
                 }
             }
         }
-        self
+        res
     }
 
     pub fn transpose(&self) -> Self {
@@ -317,3 +321,38 @@ where
         Matrix::back_substitution_u(u, &Matrix::forward_substitution_l(l, b))
     }
 }
+
+
+// Float matrix
+
+use rand::Rng;
+
+impl RandomRange for f32 {
+    fn rand_range(min: &Self, max: &Self) -> Self {
+        let mut rng = rand::thread_rng();
+        rng.gen_range(*min..=*max)
+    }
+}
+
+impl Field for f32 {
+    const ZERO: Self = 0.0;
+    const ONE: Self = 1.0;
+}
+
+impl Exponent for f32 {
+    fn dpow(self, e: i32) -> Self {
+        self.powi(e)
+    }
+}
+
+impl Round for f32 {
+    fn dround(&self, decimals: usize) -> Self {
+        let d = 10f32.powi(decimals as i32);
+        (self * d as f32).round() / d as f32
+    }
+}
+
+impl MatrixElement for f32 {}
+
+pub type FloatMatrix = Matrix<f32>;
+
