@@ -1,6 +1,6 @@
 use std::{
     fmt::Display,
-    ops::{Add, Index, IndexMut, Mul, Sub},
+    ops::{Add, Index, IndexMut, Mul, Div, Sub}, iter::Sum,
 };
 
 use pad::{Alignment, PadStr};
@@ -20,6 +20,8 @@ where
     Self: Add<Output = Self>
         + Sub<Output = Self>
         + Mul<Output = Self>
+        + Div<Output = Self>
+        + Sum
         + Field
         + RandomRange
         + Clone
@@ -102,21 +104,25 @@ where
     }
 
     pub fn dot(&self, rhs: &Self) -> Self {
-        let mut res = Matrix::zero(self.n, rhs.m);
+        // let rhs = rhs.transpose();
 
-        let rhs = rhs.transpose();
+        // Matrix::from((0..self.n).into_par_iter().map(|i| {
+        //     (0..rhs.n).map(|j| {
+        //         self.data[i]
+        //             .iter()
+        //             .zip(&rhs.data[j])
+        //             .map(|(&a, &b)| a * b)
+        //             .sum()
+        //     }).collect::<Vec<_>>()
+        // }).collect::<Vec<_>>())
 
-        for i in 0..self.n {
-            res.data[i] = (0..rhs.n).into_par_iter().map(|j| {
-                self.data[i]
-                    .iter()
-                    .zip(&rhs.data[j])
-                    .map(|(&a, &b)| a * b)
-                    .fold(T::ZERO, |a, c| a + c)
-            }).collect::<Vec<_>>();
-        }
-
-        res
+        Matrix::from((0..self.n).into_par_iter().map(|i| {
+            (0..rhs.m).map(|j| {
+                (0..self.m).map(|k| {
+                    self.data[i][k] * rhs.data[k][j]
+                }).sum()
+            }).collect::<Vec<_>>()
+        }).collect::<Vec<_>>())
     }
 
     pub fn scale(mut self, amt: T) -> Self {
@@ -128,7 +134,7 @@ where
         self
     }
 
-    pub fn round(&mut self, decimals: usize) -> &Self {
+    pub fn round(mut self, decimals: usize) -> Self {
         for i in 0..self.n {
             for j in 0..self.m {
                 self[i][j] = self[i][j].dround(decimals);
@@ -185,7 +191,7 @@ where
         let mut res = Matrix::zero(self.m, self.n);
         for i in 0..self.n {
             for j in 0..self.m {
-                res[j][i] = self[i][j];
+                res.data[j][i] = self.data[i][j];
             }
         }
         res
@@ -295,10 +301,10 @@ where
         let mut x = Matrix::zero(mat.n, 1);
 
         for i in (0..mat.n).rev() {
-            x[i][0] = b[i][0]
+            x[i][0] = (b[i][0]
                 - (i + 1..mat.n)
                     .map(|j| x[j][0] * mat[i][j])
-                    .fold(T::ZERO, |a, x| a + x);
+                    .sum()) / mat[i][i];
         }
 
         x
@@ -308,10 +314,10 @@ where
         let mut x = Matrix::zero(mat.n, 1);
 
         for i in 0..mat.n {
-            x[i][0] = b[i][0]
+            x[i][0] = (b[i][0]
                 - (0..i)
                     .map(|j| x[j][0] * mat[i][j])
-                    .fold(T::ZERO, |a, x| a + x);
+                    .sum()) / mat[i][i];
         }
 
         x
@@ -319,6 +325,25 @@ where
 
     pub fn solve_system(l: &Matrix<T>, u: &Matrix<T>, b: &Matrix<T>) -> Matrix<T> {
         Matrix::back_substitution_u(u, &Matrix::forward_substitution_l(l, b))
+    }
+}
+
+
+impl<T> Matrix<T>
+where
+    T: MatrixElement,
+{
+    pub fn solve_system_iterative(a: &Matrix<T>, b: &Matrix<T>, omega: T, iterations: usize) -> Matrix<T> {    
+        let mut x = b.clone();
+        
+        for _ in 0..iterations {
+            for i in 0..a.n {
+                let sum = (0..a.n).filter(|&j| j != i).map(|j| a[i][j] * x[j][0]).sum();
+                x[i][0] = omega / a[i][i] * (b[i][0] - sum) + (T::ONE - omega) * x[i][0];
+            }
+        }
+        
+        x
     }
 }
 
