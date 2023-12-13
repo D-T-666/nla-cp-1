@@ -47,7 +47,7 @@ Encryption and decryption of `txt`/`wav` files using ordinary linear algebra.
 9. Truncate the vector of chars to the length provided in the header of the file.
 10. Write the resulting vector of ASCII codes to the output file as characters. 
 
-## Handling `txt` files
+## Handling `wav` files
 
 ### Encryption:
 
