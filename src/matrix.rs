@@ -1,11 +1,21 @@
 use std::{
     fmt::Display,
-    ops::{Add, Index, IndexMut, Mul, Div, Sub}, iter::Sum,
+    iter::Sum,
+    ops::{Add, Div, Index, IndexMut, Mul, Sub},
 };
 
 use pad::{Alignment, PadStr};
 use rayon::prelude::*;
-use crate::strat::{Field, RandomRange};
+
+pub trait RandomRange {
+    /// Returns a random value of the implementer type in the range of `min` and `max`
+    fn rand_range(min: &Self, max: &Self) -> Self;
+}
+
+pub trait Field {
+    const ZERO: Self;
+    const ONE: Self;
+}
 
 pub trait Exponent {
     fn dpow(self, e: i32) -> Self;
@@ -104,25 +114,16 @@ where
     }
 
     pub fn dot(&self, rhs: &Self) -> Self {
-        // let rhs = rhs.transpose();
-
-        // Matrix::from((0..self.n).into_par_iter().map(|i| {
-        //     (0..rhs.n).map(|j| {
-        //         self.data[i]
-        //             .iter()
-        //             .zip(&rhs.data[j])
-        //             .map(|(&a, &b)| a * b)
-        //             .sum()
-        //     }).collect::<Vec<_>>()
-        // }).collect::<Vec<_>>())
-
-        Matrix::from((0..self.n).into_par_iter().map(|i| {
-            (0..rhs.m).map(|j| {
-                (0..self.m).map(|k| {
-                    self.data[i][k] * rhs.data[k][j]
-                }).sum()
-            }).collect::<Vec<_>>()
-        }).collect::<Vec<_>>())
+        Matrix::from(
+            (0..self.n)
+                .into_par_iter()
+                .map(|i| {
+                    (0..rhs.m)
+                        .map(|j| (0..self.m).map(|k| self.data[i][k] * rhs.data[k][j]).sum())
+                        .collect::<Vec<_>>()
+                })
+                .collect::<Vec<_>>(),
+        )
     }
 
     pub fn scale(mut self, amt: T) -> Self {
@@ -297,56 +298,50 @@ impl<T> Matrix<T>
 where
     T: MatrixElement,
 {
-    fn back_substitution_u(mat: &Matrix<T>, b: &Matrix<T>) -> Matrix<T> {
-        let mut x = Matrix::zero(mat.n, 1);
+    fn back_substitution_u(mat: &Matrix<T>, b: Vec<T>) -> Vec<T> {
+        let mut x = vec![T::ZERO; mat.n];
 
         for i in (0..mat.n).rev() {
-            x[i][0] = (b[i][0]
-                - (i + 1..mat.n)
-                    .map(|j| x[j][0] * mat[i][j])
-                    .sum()) / mat[i][i];
+            x[i] = (b[i] - (i + 1..mat.n).map(|j| x[j] * mat[i][j]).sum()) / mat[i][i];
         }
 
         x
     }
 
-    fn forward_substitution_l(mat: &Matrix<T>, b: &Matrix<T>) -> Matrix<T> {
-        let mut x = Matrix::zero(mat.n, 1);
+    fn forward_substitution_l(mat: &Matrix<T>, b: Vec<T>) -> Vec<T> {
+        let mut x = vec![T::ZERO; mat.n];
 
         for i in 0..mat.n {
-            x[i][0] = (b[i][0]
-                - (0..i)
-                    .map(|j| x[j][0] * mat[i][j])
-                    .sum()) / mat[i][i];
+            x[i] = (b[i] - (0..i).map(|j| x[j] * mat[i][j]).sum()) / mat[i][i];
         }
 
         x
     }
 
-    pub fn solve_system(l: &Matrix<T>, u: &Matrix<T>, b: &Matrix<T>) -> Matrix<T> {
-        Matrix::back_substitution_u(u, &Matrix::forward_substitution_l(l, b))
+    pub fn solve_system_lu(l: &Matrix<T>, u: &Matrix<T>, b: Vec<T>) -> Vec<T> {
+        Matrix::back_substitution_u(u, Matrix::forward_substitution_l(l, b))
     }
 }
-
 
 impl<T> Matrix<T>
 where
     T: MatrixElement,
 {
-    pub fn solve_system_iterative(a: &Matrix<T>, b: &Matrix<T>, omega: T, iterations: usize) -> Matrix<T> {    
-        let mut x = b.clone();
-        
+    /// ## SOR
+    /// Successive Over-Relaxation
+    pub fn solve_system_iterative(a: &Matrix<T>, b: Vec<T>, omega: T, iterations: usize) -> Vec<T> {
+        let mut x = vec![T::ZERO; b.len()];
+
         for _ in 0..iterations {
             for i in 0..a.n {
-                let sum = (0..a.n).filter(|&j| j != i).map(|j| a[i][j] * x[j][0]).sum();
-                x[i][0] = omega / a[i][i] * (b[i][0] - sum) + (T::ONE - omega) * x[i][0];
+                let sum = (0..a.n).filter(|&j| j != i).map(|j| a[i][j] * x[j]).sum();
+                x[i] = omega / a[i][i] * (b[i] - sum) + (T::ONE - omega) * x[i];
             }
         }
-        
+
         x
     }
 }
-
 
 // Float matrix
 
@@ -380,4 +375,3 @@ impl Round for f32 {
 impl MatrixElement for f32 {}
 
 pub type FloatMatrix = Matrix<f32>;
-
